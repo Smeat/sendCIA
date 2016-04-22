@@ -1,7 +1,20 @@
 #!/usr/bin/env python
 
-import socket, sys, os, struct, getopt
+import socket, sys, os, struct, getopt, time, collections
 
+speed_samples = collections.deque(maxlen=20)
+
+def add_transfer_speed_sample(size, time):
+	speed_samples.append((size/1024.0)/time)
+	
+def get_avg_transfer_speed():
+	i = 0
+	acc_speed = 0
+	for speed in speed_samples:
+		acc_speed += speed
+		i+=1
+		
+	return acc_speed/i
 
 def connect(host, port):
 	for info in socket.getaddrinfo(host, "5000", socket.AF_UNSPEC, socket.SOCK_STREAM):
@@ -21,15 +34,19 @@ def send_cia(sock, path):
 
 	sock.send(file_num_net)
 	sock.send(file_size_net)
-	#sock.recv(1024)
+	sock.recv(1024)
 	total_sent = 0;
 	while True:
-		chunk = input_file.read(1024 * 32)
+		start = time.perf_counter()
+		chunk_size = 1024 * 1024 #TODO: test other values
+		chunk = input_file.read(chunk_size)
 		if not chunk:
 			break
+		
 		sock.sendall(chunk)
-		total_sent += 1024 * 32 #TODO: calc actual size
-		sys.stdout.write("\rTransfer: %i%% %fMb/%fMb" % ((total_sent/float(file_size)) * 100, total_sent/1024.0/1024.0, file_size/1024.0/1024.0))
+		total_sent += chunk_size #TODO: calc actual size
+		add_transfer_speed_sample(chunk_size, time.perf_counter() - start) #TODO: is it even accurate?
+		sys.stdout.write("\rTransfer: %i%% %.2fMb/%.2fMb %.2fkb/s                     " % ((total_sent/float(file_size)) * 100, total_sent/1024.0/1024.0, file_size/1024.0/1024.0, get_avg_transfer_speed()))
 		sys.stdout.flush()
 
 	print("\n")
@@ -42,11 +59,11 @@ def main(argv):
    try:
       opts, args = getopt.getopt(argv,"hi:c:",["cia=","ip="])
    except getopt.GetoptError:
-      print 'sendCIA.py -c cia file -i ip'
+      print ("sendCIA.py -c cia file -i ip\n")
       sys.exit(2)
    for opt, arg in opts:
       if opt == '-h':
-         print 'sendCIA.py -c <cia file> -i <ip>'
+         print ("sendCIA.py -c <cia file> -i <ip>\n")
          sys.exit()
       elif opt in ("-c", "--cia"):
          inputfile = arg
